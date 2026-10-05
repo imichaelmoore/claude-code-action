@@ -12,7 +12,11 @@ import {
   writeFileSync,
 } from "fs";
 import { dirname, isAbsolute, join } from "path";
-import { restoreConfigFromBase } from "../src/github/operations/restore-config";
+import {
+  resolveRestoreBase,
+  restoreConfigFromBase,
+} from "../src/github/operations/restore-config";
+import { createMockAutomationContext, createMockContext } from "./mockContext";
 
 const CLAUDE_PR_EXCLUDE_PATTERN = "/.claude-pr/";
 
@@ -529,4 +533,82 @@ describe("restoreConfigFromBase", () => {
     const gitPath = git(["rev-parse", "--git-path", "info/exclude"]).trim();
     return isAbsolute(gitPath) ? gitPath : join(repoDir, gitPath);
   }
+});
+
+describe("resolveRestoreBase", () => {
+  const pullRequestPayload = { pull_request: { base: { ref: "release/1.x" } } };
+
+  test.each([
+    "pull_request",
+    "pull_request_review",
+    "pull_request_review_comment",
+  ] as const)("%s restores from the PR's base ref in the payload", (event) => {
+    const context = createMockContext({
+      eventName: event,
+      isPR: true,
+      payload: pullRequestPayload as any,
+    });
+
+    expect(resolveRestoreBase(context, "main")).toBe("release/1.x");
+  });
+
+  test("rejects an invalid PR base ref", () => {
+    const context = createMockContext({
+      eventName: "pull_request",
+      isPR: true,
+      payload: { pull_request: { base: { ref: "-x" } } } as any,
+    });
+
+    expect(() => resolveRestoreBase(context, "main")).toThrow(
+      "Branch names cannot start with a dash",
+    );
+  });
+
+  test("issue_comment on a PR falls back to the mode's base branch", () => {
+    const context = createMockContext({
+      eventName: "issue_comment",
+      isPR: true,
+    });
+
+    expect(resolveRestoreBase(context, "develop")).toBe("develop");
+    expect(resolveRestoreBase(context, undefined)).toBeUndefined();
+  });
+
+  test("issue events that are not on a PR restore nothing", () => {
+    const context = createMockContext({ eventName: "issues", isPR: false });
+
+    expect(resolveRestoreBase(context, "main")).toBeUndefined();
+  });
+
+  test("merge_group restores from the branch the group merges into", () => {
+    const context = createMockAutomationContext({
+      eventName: "merge_group",
+      payload: {
+        action: "checks_requested",
+        merge_group: { base_ref: "refs/heads/release/1.x" },
+      } as any,
+    });
+
+    expect(resolveRestoreBase(context, "main")).toBe("release/1.x");
+  });
+
+  test("rejects an invalid merge group base ref", () => {
+    const context = createMockAutomationContext({
+      eventName: "merge_group",
+      payload: { merge_group: { base_ref: "refs/heads/bad name" } } as any,
+    });
+
+    expect(() => resolveRestoreBase(context, "main")).toThrow(
+      "Invalid branch name",
+    );
+  });
+
+  test.each(["workflow_dispatch", "schedule", "workflow_run"] as const)(
+    "%s restores nothing",
+    (event) => {
+      const context = createMockAutomationContext({ eventName: event });
+
+      expect(resolveRestoreBase(context, "main")).toBeUndefined();
+    },
+  );
 });

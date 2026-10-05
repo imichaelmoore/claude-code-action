@@ -13,6 +13,15 @@ import {
   writeFileSync,
 } from "fs";
 import { dirname, join, posix, relative, sep } from "path";
+import {
+  isEntityContext,
+  isMergeGroupEvent,
+  isPullRequestEvent,
+  isPullRequestReviewCommentEvent,
+  isPullRequestReviewEvent,
+  type GitHubContext,
+} from "../context";
+import { validateBranchName } from "./branch";
 import { fetchDepthArgs } from "./fetch-depth";
 
 // Paths that are both PR-controllable and read from cwd at CLI startup.
@@ -226,6 +235,52 @@ function ensureClaudePrExcludedFromGit(): void {
   const prefix =
     excludeContents.length === 0 || excludeContents.endsWith("\n") ? "" : "\n";
   appendFileSync(excludePath, `${prefix}${CLAUDE_PR_EXCLUDE_PATTERN}\n`);
+}
+
+/**
+ * Picks the trusted branch to restore SENSITIVE_PATHS from, or returns
+ * undefined when the event does not check out pull request content.
+ *
+ * Pull request events read pull_request.base.ref from the payload directly
+ * because agent mode's branchInfo.baseBranch defaults to the repo's default
+ * branch rather than the PR's actual target (agent/index.ts). For
+ * issue_comment on a PR the payload lacks base.ref, so this falls back to the
+ * mode-provided value. Tag mode fetches it from GraphQL; agent mode on
+ * issue_comment is an edge case that at worst restores from the wrong trusted
+ * branch (still secure).
+ *
+ * A merge group's head commit carries the queued pull requests' changes, so
+ * it restores from the branch the group merges into.
+ *
+ * @param modeBaseBranch - The base branch the mode's prepare step returned.
+ */
+export function resolveRestoreBase(
+  context: GitHubContext,
+  modeBaseBranch: string | undefined,
+): string | undefined {
+  if (isEntityContext(context) && context.isPR) {
+    if (
+      isPullRequestEvent(context) ||
+      isPullRequestReviewEvent(context) ||
+      isPullRequestReviewCommentEvent(context)
+    ) {
+      const restoreBase = context.payload.pull_request.base.ref;
+      validateBranchName(restoreBase);
+      return restoreBase;
+    }
+    return modeBaseBranch;
+  }
+
+  if (isMergeGroupEvent(context)) {
+    const restoreBase = context.payload.merge_group.base_ref.replace(
+      /^refs\/heads\//,
+      "",
+    );
+    validateBranchName(restoreBase);
+    return restoreBase;
+  }
+
+  return undefined;
 }
 
 /**

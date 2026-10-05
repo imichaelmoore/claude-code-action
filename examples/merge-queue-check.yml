@@ -1,0 +1,65 @@
+name: Claude Merge Queue Check
+
+# Runs when pull requests enter a merge queue. To make the queue wait for this
+# check, add the `claude-merge-check` job as a required status check in the
+# target branch's ruleset or branch protection rule.
+on:
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+
+jobs:
+  claude-merge-check:
+    # A required check must also pass on the pull request before it can join
+    # the queue. A job skipped by `if` reports success, so the check passes on
+    # the pull request and Claude only runs in the merge queue.
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout merge group
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # Need the base commit to diff against
+
+      - name: Review the merge group
+        id: review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            TARGET BRANCH: ${{ github.event.merge_group.base_ref }}
+            BASE COMMIT: ${{ github.event.merge_group.base_sha }}
+
+            The checked-out commit combines the pull requests in this merge
+            group with the target branch. Run
+            `git diff ${{ github.event.merge_group.base_sha }} HEAD` to see
+            what is about to merge.
+
+            Decide whether anything in that diff must not reach the target
+            branch, such as committed secrets or credentials, debugging code
+            left in, or conflict markers. Do not block on style or design
+            preferences.
+          claude_args: |
+            --allowedTools "Bash(git diff:*),Bash(git log:*),Read,Grep,Glob"
+            --json-schema '{"type":"object","properties":{"block_merge":{"type":"boolean","description":"Whether the merge group contains something that must not merge"},"reason":{"type":"string","description":"One-sentence explanation"}},"required":["block_merge","reason"]}'
+
+      - name: Fail the check unless Claude approved the merge group
+        env:
+          RESULT: ${{ steps.review.outputs.structured_output }}
+        run: |
+          if [ -z "$RESULT" ]; then
+            echo "::error::Claude did not return a verdict for this merge group"
+            exit 1
+          fi
+          # jq without -r keeps the reason on one quoted line, so text from the
+          # diff cannot start a workflow command.
+          echo "Reason: $(jq '.reason' <<<"$RESULT")"
+          if [ "$(jq '.block_merge' <<<"$RESULT")" != "false" ]; then
+            echo "::error::Claude blocked this merge group"
+            exit 1
+          fi

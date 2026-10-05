@@ -23,6 +23,7 @@ This action supports the following GitHub events ([learn more GitHub event trigg
 - `pull_request_review_comment` - When comments are made on PR reviews
 - `repository_dispatch` - Custom events triggered via API
 - `workflow_dispatch` - Manual workflow triggers (coming soon)
+- `merge_group` - When pull requests enter a merge queue
 
 ## Automated Documentation Updates
 
@@ -44,6 +45,41 @@ steps:
 ```
 
 When API files are modified, the action automatically detects that a `prompt` is provided and runs in agent mode. Claude updates your README with the latest endpoint documentation and pushes the changes back to the PR, keeping your docs in sync with your code.
+
+## Merge Queue Checks
+
+Run Claude on each merge group before it lands (see [`examples/merge-queue-check.yml`](../examples/merge-queue-check.yml)):
+
+```yaml
+on:
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+
+jobs:
+  claude-merge-check:
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: anthropics/claude-code-action@v1
+        with:
+          prompt: |
+            Review `git diff ${{ github.event.merge_group.base_sha }} HEAD`
+            for anything that must not merge into ${{ github.event.merge_group.base_ref }}.
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+`merge_group` runs in agent mode, so it needs a `prompt` and does not support `track_progress`. GitHub attributes these runs to its `github-merge-queue[bot]` app rather than to the person who queued the pull request, and the action accepts that actor for `merge_group` events without an `allowed_bots` entry.
+
+The merge group commit contains the queued pull requests' changes, so before Claude starts the action restores its configuration files (`.claude/`, `.mcp.json`, `CLAUDE.md` and the others listed in [security](./security.md#which-files-come-from-the-base-branch-on-pull-requests)) from the branch the group merges into, as it does for pull requests. Those paths in the working tree then hold the target branch's versions. To review what will actually merge, have Claude read `git diff` between the base commit and `HEAD`, which compares commits rather than the working tree.
+
+The action step succeeds whatever Claude concludes. To make the queue wait for a verdict, add a step that fails the job when Claude finds a problem, as the example does with `--json-schema` and `structured_output`, then add the job as a required status check. GitHub also requires that check to pass on the pull request before it can join the queue; the `pull_request` trigger and job-level `if` above handle this, since a job skipped by `if` reports success.
 
 ## Author-Specific Code Reviews
 
