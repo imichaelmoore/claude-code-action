@@ -592,14 +592,14 @@ describe("resolveRestoreBase", () => {
     expect(resolveRestoreBase(context, "main")).toBe("release/1.x");
   });
 
-  test("rejects an invalid merge group base ref", () => {
+  test("validates the merge group base ref after stripping refs/heads/", () => {
     const context = createMockAutomationContext({
       eventName: "merge_group",
-      payload: { merge_group: { base_ref: "refs/heads/bad name" } } as any,
+      payload: { merge_group: { base_ref: "refs/heads/-x" } } as any,
     });
 
     expect(() => resolveRestoreBase(context, "main")).toThrow(
-      "Invalid branch name",
+      "Branch names cannot start with a dash",
     );
   });
 

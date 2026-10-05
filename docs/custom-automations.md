@@ -62,22 +62,28 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      - env:
+          BASE_REF: ${{ github.event.merge_group.base_ref }}
+        run: git diff "origin/${BASE_REF#refs/heads/}...HEAD" > merge-group.diff
       - uses: anthropics/claude-code-action@v1
         with:
           prompt: |
-            Review `git diff ${{ github.event.merge_group.base_sha }} HEAD`
-            for anything that must not merge into ${{ github.event.merge_group.base_ref }}.
+            merge-group.diff contains every change this merge group would bring
+            into ${{ github.event.merge_group.base_ref }}. Look for anything that must not merge.
+          claude_args: '--allowedTools "Read,Grep,Glob"'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
 `merge_group` runs in agent mode, so it needs a `prompt` and does not support `track_progress`. GitHub attributes these runs to its `github-merge-queue[bot]` app rather than to the person who queued the pull request, and the action accepts that actor for `merge_group` events without an `allowed_bots` entry.
 
-The merge group commit contains the queued pull requests' changes, so before Claude starts the action restores its configuration files (`.claude/`, `.mcp.json`, `CLAUDE.md` and the others listed in [security](./security.md#which-files-come-from-the-base-branch-on-pull-requests)) from the branch the group merges into, as it does for pull requests. Those paths in the working tree then hold the target branch's versions. To review what will actually merge, have Claude read `git diff` between the base commit and `HEAD`, which compares commits rather than the working tree.
+Pass `github_token: ${{ secrets.GITHUB_TOKEN }}` for merge queue checks. Without it, the action exchanges an OIDC token for a Claude GitHub App token, and that exchange skips the run whenever the workflow file differs from the default branch's copy. In a merge queue that happens every time a queued pull request edits the workflow, and on queues for branches whose copy of the workflow differs, so a required check would never get a verdict. The workflow token is also limited to the job's `permissions:`, which the App token is not.
+
+The merge group commit contains the queued pull requests' changes, so before Claude starts the action restores its configuration files (`.claude/`, `.mcp.json`, `CLAUDE.md` and the others listed in [security](./security.md#which-files-come-from-the-base-branch-on-pull-requests)) from the branch the group merges into, as it does for pull requests. Those paths in the working tree then hold the target branch's versions, so give Claude the changes as a diff. The example writes it before the action runs, which also keeps Bash out of the allowed tools. It diffs against the target branch rather than `merge_group.base_sha` so that the review also covers entries ahead of this one in the queue that have not merged yet.
 
 The action step succeeds whatever Claude concludes. To make the queue wait for a verdict, add a step that fails the job when Claude finds a problem, as the example does with `--json-schema` and `structured_output`, then add the job as a required status check. GitHub also requires that check to pass on the pull request before it can join the queue; the `pull_request` trigger and job-level `if` above handle this, since a job skipped by `if` reports success.
 

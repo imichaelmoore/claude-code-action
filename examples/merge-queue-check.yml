@@ -17,35 +17,43 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
 
     steps:
       - name: Checkout merge group
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0 # Need the base commit to diff against
+          fetch-depth: 0 # Need the target branch to diff against
+
+      # Diff against the target branch rather than merge_group.base_sha so the
+      # review also covers queue entries ahead of this one that have not merged
+      # yet. Writing the diff to a file lets Claude review it without Bash.
+      - name: Write the merge group diff
+        env:
+          BASE_REF: ${{ github.event.merge_group.base_ref }}
+        run: git diff "origin/${BASE_REF#refs/heads/}...HEAD" > merge-group.diff
 
       - name: Review the merge group
         id: review
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The workflow token limits Claude to this job's read-only
+          # permissions. It also avoids the Claude GitHub App's token exchange,
+          # which skips the run whenever this workflow file differs from the
+          # default branch's copy, as it does when a queued pull request
+          # edits it.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
             REPO: ${{ github.repository }}
             TARGET BRANCH: ${{ github.event.merge_group.base_ref }}
-            BASE COMMIT: ${{ github.event.merge_group.base_sha }}
 
-            The checked-out commit combines the pull requests in this merge
-            group with the target branch. Run
-            `git diff ${{ github.event.merge_group.base_sha }} HEAD` to see
-            what is about to merge.
-
-            Decide whether anything in that diff must not reach the target
-            branch, such as committed secrets or credentials, debugging code
-            left in, or conflict markers. Do not block on style or design
-            preferences.
+            merge-group.diff contains every change that this merge group would
+            bring into the target branch. Decide whether anything in it must
+            not reach the target branch, such as committed secrets or
+            credentials, debugging code left in, or conflict markers. Do not
+            block on style or design preferences.
           claude_args: |
-            --allowedTools "Bash(git diff:*),Bash(git log:*),Read,Grep,Glob"
+            --allowedTools "Read,Grep,Glob"
             --json-schema '{"type":"object","properties":{"block_merge":{"type":"boolean","description":"Whether the merge group contains something that must not merge"},"reason":{"type":"string","description":"One-sentence explanation"}},"required":["block_merge","reason"]}'
 
       - name: Fail the check unless Claude approved the merge group
