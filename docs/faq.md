@@ -248,6 +248,10 @@ For specialized environments like Nix, NixOS, or custom container setups where y
 - The action will skip automatic installation when custom paths are provided
 - Ensure the custom executables are available in your GitHub Actions environment
 
+### How can I run Claude Code inside a sandbox?
+
+Set `path_to_claude_code_wrapper` to the absolute path of an executable of your own, outside the workspace. The action installs Claude Code as usual and then starts the session as `<wrapper> <claude> <args...>`, so a wrapper that ends in `exec srt --settings FILE -- "$@"` puts the whole Claude Code process inside [sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime). Plugin installation, the action's own process and the job's other steps stay outside. See [Running Claude Code Inside a Sandbox](./configuration.md#running-claude-code-inside-a-sandbox-launch-wrapper) for what a wrapper must do, a complete example and the caveats.
+
 ## Best Practices
 
 1. **Always specify permissions explicitly** in your workflow file
