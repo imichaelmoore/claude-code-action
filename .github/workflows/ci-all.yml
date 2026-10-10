@@ -25,6 +25,9 @@ jobs:
   test-custom-executables:
     uses: ./.github/workflows/test-custom-executables.yml
 
+  test-claude-code-wrapper:
+    uses: ./.github/workflows/test-claude-code-wrapper.yml
+
   test-mcp-servers:
     uses: ./.github/workflows/test-mcp-servers.yml
 
