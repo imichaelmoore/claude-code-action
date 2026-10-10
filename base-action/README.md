@@ -122,28 +122,29 @@ Do not set `anthropic_api_key` or `claude_code_oauth_token` alongside the federa
 
 ## Inputs
 
-| Input                            | Description                                                                                                             | Required | Default       |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------- | ------------- |
-| `prompt`                         | The prompt to send to Claude Code                                                                                       | No\*     | `''`          |
-| `prompt_file`                    | Path to a file containing the prompt to send to Claude Code                                                             | No\*     | `''`          |
-| `settings`                       | Claude Code settings as a JSON string or path to a settings JSON file                                                   | No       | `''`          |
-| `claude_args`                    | Additional arguments to pass directly to the Claude CLI                                                                 | No       | `''`          |
-| `anthropic_api_key`              | Anthropic API key for direct Anthropic API authentication                                                               | No       | `''`          |
-| `claude_code_oauth_token`        | Claude Code OAuth token as an alternative to an Anthropic API key                                                       | No       | `''`          |
-| `anthropic_federation_rule_id`   | Workload identity federation rule ID (fdrl\_...). Requires `id-token: write` permission                                 | No       | `''`          |
-| `anthropic_organization_id`      | Anthropic organization UUID used for workload identity federation                                                       | No       | `''`          |
-| `anthropic_service_account_id`   | Service account ID (svac\_...) the federated token acts as                                                              | No       | `''`          |
-| `anthropic_workspace_id`         | Workspace ID (wrkspc\_...) for federation                                                                               | No       | `''`          |
-| `anthropic_oidc_audience`        | Audience for the GitHub OIDC token request                                                                              | No       | `''`          |
-| `use_bedrock`                    | Use Amazon Bedrock with OIDC authentication                                                                             | No       | `'false'`     |
-| `use_vertex`                     | Use Google Vertex AI with OIDC authentication                                                                           | No       | `'false'`     |
-| `use_foundry`                    | Use Microsoft Foundry with OIDC authentication                                                                          | No       | `'false'`     |
-| `use_node_cache`                 | Enable Node.js dependency caching for projects with lock files                                                          | No       | `'false'`     |
-| `path_to_claude_code_executable` | Path to a custom Claude Code executable                                                                                 | No       | `''`          |
-| `path_to_bun_executable`         | Path to a custom Bun executable                                                                                         | No       | `''`          |
-| `show_full_output`               | Show full JSON output (⚠️ May expose secrets - see [security docs](../docs/security.md#️-full-output-security-warning)) | No       | `'false'`\*\* |
-| `plugins`                        | Newline-separated Claude Code plugin names to install                                                                   | No       | `''`          |
-| `plugin_marketplaces`            | Newline-separated plugin marketplace Git URLs to install                                                                | No       | `''`          |
+| Input                            | Description                                                                                                                                                      | Required | Default       |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------- |
+| `prompt`                         | The prompt to send to Claude Code                                                                                                                                | No\*     | `''`          |
+| `prompt_file`                    | Path to a file containing the prompt to send to Claude Code                                                                                                      | No\*     | `''`          |
+| `settings`                       | Claude Code settings as a JSON string or path to a settings JSON file                                                                                            | No       | `''`          |
+| `claude_args`                    | Additional arguments to pass directly to the Claude CLI                                                                                                          | No       | `''`          |
+| `anthropic_api_key`              | Anthropic API key for direct Anthropic API authentication                                                                                                        | No       | `''`          |
+| `claude_code_oauth_token`        | Claude Code OAuth token as an alternative to an Anthropic API key                                                                                                | No       | `''`          |
+| `anthropic_federation_rule_id`   | Workload identity federation rule ID (fdrl\_...). Requires `id-token: write` permission                                                                          | No       | `''`          |
+| `anthropic_organization_id`      | Anthropic organization UUID used for workload identity federation                                                                                                | No       | `''`          |
+| `anthropic_service_account_id`   | Service account ID (svac\_...) the federated token acts as                                                                                                       | No       | `''`          |
+| `anthropic_workspace_id`         | Workspace ID (wrkspc\_...) for federation                                                                                                                        | No       | `''`          |
+| `anthropic_oidc_audience`        | Audience for the GitHub OIDC token request                                                                                                                       | No       | `''`          |
+| `use_bedrock`                    | Use Amazon Bedrock with OIDC authentication                                                                                                                      | No       | `'false'`     |
+| `use_vertex`                     | Use Google Vertex AI with OIDC authentication                                                                                                                    | No       | `'false'`     |
+| `use_foundry`                    | Use Microsoft Foundry with OIDC authentication                                                                                                                   | No       | `'false'`     |
+| `use_node_cache`                 | Enable Node.js dependency caching for projects with lock files                                                                                                   | No       | `'false'`     |
+| `path_to_claude_code_executable` | Path to a custom Claude Code executable                                                                                                                          | No       | `''`          |
+| `path_to_claude_code_wrapper`    | Absolute path to an executable, outside the workspace, that starts the Claude Code session, for example inside a sandbox (see [Launch Wrapper](#launch-wrapper)) | No       | `''`          |
+| `path_to_bun_executable`         | Path to a custom Bun executable                                                                                                                                  | No       | `''`          |
+| `show_full_output`               | Show full JSON output (⚠️ May expose secrets - see [security docs](../docs/security.md#️-full-output-security-warning))                                          | No       | `'false'`\*\* |
+| `plugins`                        | Newline-separated Claude Code plugin names to install                                                                                                            | No       | `''`          |
+| `plugin_marketplaces`            | Newline-separated plugin marketplace Git URLs to install                                                                                                         | No       | `''`          |
 
 \*Either `prompt` or `prompt_file` must be provided, but not both.
 
@@ -329,6 +330,31 @@ You can combine MCP config with other inputs like allowed tools:
       --allowedTools "Bash(git:*),Read,mcp__server-name__custom_tool"
     anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
+
+## Launch Wrapper
+
+Set `path_to_claude_code_wrapper` to the absolute path of an executable of your own, and the action starts the Claude Code session through it. Claude Code is installed as usual, and the session is then run as `<wrapper> <command> <args...>`, where `<command> <args...>` is the command line the action would otherwise have started itself. A wrapper that ends in `exec srt --settings FILE -- "$@"` therefore puts the whole Claude Code process inside [sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime).
+
+```yaml
+- name: Write the wrapper
+  run: |
+    cat > "$RUNNER_TEMP/wrapper.sh" <<'EOF'
+    #!/bin/sh
+    # Set up whatever the session should run inside, then become the session.
+    exec "$@"
+    EOF
+    chmod +x "$RUNNER_TEMP/wrapper.sh"
+
+- uses: anthropics/claude-code-base-action@beta
+  with:
+    prompt: "Your prompt here"
+    anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+    path_to_claude_code_wrapper: ${{ runner.temp }}/wrapper.sh
+```
+
+Plugin installation (`claude plugin ...`) and the action's own process are not wrapped. The wrapper runs with the step's full environment before any sandbox exists, so it must come from a place you control, and a path inside the workspace is refused. A script needs a `#!` line. It is not supported on Windows runners.
+
+What a wrapper may rely on and must do, a complete example for `srt`, and the caveats are in [Running Claude Code Inside a Sandbox (Launch Wrapper)](https://github.com/anthropics/claude-code-action/blob/main/docs/configuration.md#running-claude-code-inside-a-sandbox-launch-wrapper). One point there concerns this action in particular: it puts Node 18 first on `PATH` unless the `NODE_VERSION` environment variable says otherwise, and `srt` needs Node 20.11 or newer.
 
 ## Example: PR Code Review
 

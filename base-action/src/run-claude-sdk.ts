@@ -9,6 +9,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { ParsedSdkOptions } from "./parse-sdk-options";
 import { writeExecutionFile } from "./execution-file";
+import { createClaudeCodeWrapper } from "./claude-code-wrapper";
 
 export type ClaudeRunResult = {
   executionFile?: string;
@@ -165,6 +166,7 @@ function sanitizeSdkOutput(
 export async function runClaudeWithSdk(
   promptPath: string,
   { sdkOptions, showFullOutput, hasJsonSchema }: ParsedSdkOptions,
+  pathToClaudeCodeWrapper?: string,
 ): Promise<ClaudeRunResult> {
   // Create prompt configuration - may be a string or multi-block message
   const prompt = await createPromptConfig(promptPath, showFullOutput);
@@ -183,11 +185,20 @@ export async function runClaudeWithSdk(
   const { env, extraArgs, ...optionsToLog } = sdkOptions;
   console.log("SDK options:", JSON.stringify(optionsToLog, null, 2));
 
+  // The real executable stays in pathToClaudeCodeExecutable: the wrapper
+  // receives it as its first argument.
+  const wrapper = pathToClaudeCodeWrapper
+    ? createClaudeCodeWrapper(pathToClaudeCodeWrapper)
+    : undefined;
+  const options = wrapper
+    ? { ...sdkOptions, spawnClaudeCodeProcess: wrapper.spawn }
+    : sdkOptions;
+
   const messages: SDKMessage[] = [];
   let resultMessage: SDKResultMessage | undefined;
 
   try {
-    for await (const message of query({ prompt, options: sdkOptions })) {
+    for await (const message of query({ prompt, options })) {
       messages.push(message);
 
       const sanitized = sanitizeSdkOutput(message, showFullOutput);
@@ -210,6 +221,7 @@ export async function runClaudeWithSdk(
       }
     }
   } catch (error) {
+    await wrapper?.logStderrTail();
     console.error("SDK execution error:", error);
     await writeExecutionFile(messages);
     throw new Error(`SDK execution error: ${error}`);
@@ -234,6 +246,7 @@ export async function runClaudeWithSdk(
   }
 
   if (!resultMessage) {
+    await wrapper?.logStderrTail();
     core.error("No result message received from Claude");
     throw new Error("No result message received from Claude");
   }

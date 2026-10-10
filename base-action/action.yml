@@ -75,6 +75,10 @@ inputs:
     description: "Optional path to a custom Claude Code executable. If provided, skips automatic installation and uses this executable instead. WARNING: Using an older version may cause problems if the action begins taking advantage of new Claude Code features. This input is typically not needed unless you're debugging something specific or have unique needs in your environment."
     required: false
     default: ""
+  path_to_claude_code_wrapper:
+    description: "Optional absolute path to an executable, outside the workspace, that starts the Claude Code session. Claude Code is installed as usual, and the session is then run as '<wrapper> <claude> <args...>', so the wrapper can start it inside a sandbox such as srt. Plugin installation is not wrapped. See https://github.com/anthropics/claude-code-action/blob/main/docs/configuration.md."
+    required: false
+    default: ""
   path_to_bun_executable:
     description: "Optional path to a custom Bun executable. If provided, skips automatic Bun installation and uses this executable instead. WARNING: Using an incompatible version may cause problems if the action requires specific Bun features. This input is typically not needed unless you're debugging something specific or have unique needs in your environment."
     required: false
@@ -192,6 +196,7 @@ runs:
         INPUT_SETTINGS: ${{ inputs.settings }}
         INPUT_CLAUDE_ARGS: ${{ inputs.claude_args }}
         INPUT_PATH_TO_CLAUDE_CODE_EXECUTABLE: ${{ inputs.path_to_claude_code_executable }}
+        INPUT_PATH_TO_CLAUDE_CODE_WRAPPER: ${{ inputs.path_to_claude_code_wrapper }}
         INPUT_PATH_TO_BUN_EXECUTABLE: ${{ inputs.path_to_bun_executable }}
         INPUT_SHOW_FULL_OUTPUT: ${{ inputs.show_full_output }}
         INPUT_PLUGINS: ${{ inputs.plugins }}
