@@ -27,10 +27,23 @@ jobs:
       # Diff against the target branch rather than merge_group.base_sha so the
       # review also covers queue entries ahead of this one that have not merged
       # yet. Writing the diff to a file lets Claude review it without Bash.
+      #
+      # The checkout is the queued pull requests' content, so it should not
+      # decide what the diff shows or where it lands:
+      # - --attr-source (git 2.41+) reads .gitattributes from the target branch,
+      #   so a queued pull request cannot mark a file -diff or binary to keep
+      #   its content out of the diff.
+      # - --ignore-submodules=none shows submodule changes even if .gitmodules
+      #   sets `ignore`.
+      # - rm keeps a committed merge-group.diff symlink from redirecting the
+      #   write.
       - name: Write the merge group diff
         env:
           BASE_REF: ${{ github.event.merge_group.base_ref }}
-        run: git diff "origin/${BASE_REF#refs/heads/}...HEAD" > merge-group.diff
+        run: |
+          base="origin/${BASE_REF#refs/heads/}"
+          rm -rf merge-group.diff
+          git --attr-source="$base" diff --ignore-submodules=none "$base...HEAD" > merge-group.diff
 
       - name: Review the merge group
         id: review
@@ -52,6 +65,9 @@ jobs:
             not reach the target branch, such as committed secrets or
             credentials, debugging code left in, or conflict markers. Do not
             block on style or design preferences.
+
+            The diff names binary files without showing their content. If one
+            looks like it should be text, read it from the working tree.
           claude_args: |
             --allowedTools "Read,Grep,Glob"
             --json-schema '{"type":"object","properties":{"block_merge":{"type":"boolean","description":"Whether the merge group contains something that must not merge"},"reason":{"type":"string","description":"One-sentence explanation"}},"required":["block_merge","reason"]}'
@@ -64,9 +80,13 @@ jobs:
             echo "::error::Claude did not return a verdict for this merge group"
             exit 1
           fi
-          # jq without -r keeps the reason on one quoted line, so text from the
-          # diff cannot start a workflow command.
+          # The reason can quote text from the diff, so workflow commands are
+          # off while it prints. The token is random and chosen after Claude
+          # has finished, so nothing in the reason can turn them back on.
+          stop_token="$(openssl rand -hex 16)"
+          echo "::stop-commands::$stop_token"
           echo "Reason: $(jq '.reason' <<<"$RESULT")"
+          echo "::$stop_token::"
           if [ "$(jq '.block_merge' <<<"$RESULT")" != "false" ]; then
             echo "::error::Claude blocked this merge group"
             exit 1
