@@ -39,6 +39,7 @@ import { redactSecrets } from "../github/utils/sanitizer";
 import { setupWorkloadIdentity } from "../../base-action/src/workload-identity";
 import type { WorkloadIdentityHandle } from "../../base-action/src/workload-identity";
 import { validateEnvironmentVariables } from "../../base-action/src/validate-env";
+import { validateClaudeCodeWrapper } from "../../base-action/src/claude-code-wrapper";
 import { setupClaudeCodeSettings } from "../../base-action/src/setup-claude-code-settings";
 import { installPlugins } from "../../base-action/src/install-plugins";
 import { preparePrompt } from "../../base-action/src/prepare-prompt";
@@ -166,6 +167,12 @@ async function run() {
   let prepareCompleted = false;
   try {
     // Phase 1: Prepare
+    // Refuse a bad wrapper on every run, before any token is obtained
+    const claudeWrapper = validateClaudeCodeWrapper(
+      process.env.INPUT_PATH_TO_CLAUDE_CODE_WRAPPER,
+      process.env.INPUT_PATH_TO_CLAUDE_CODE_EXECUTABLE,
+    );
+
     const actionInputsPresent = collectActionInputsPresence();
     context = parseGitHubContext();
     const modeName = detectMode(context);
@@ -296,6 +303,7 @@ async function run() {
       appendSystemPrompt: process.env.APPEND_SYSTEM_PROMPT,
       model: process.env.ANTHROPIC_MODEL,
       pathToClaudeCodeExecutable: claudeExecutable,
+      pathToClaudeCodeWrapper: claudeWrapper,
       showFullOutput: process.env.INPUT_SHOW_FULL_OUTPUT,
     });
 
