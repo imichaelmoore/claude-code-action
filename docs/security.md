@@ -3,7 +3,7 @@
 ## Access Control
 
 - **Repository Access**: The action can only be triggered by users with write access to the repository. This is checked for issue, pull request, comment, and review events, and for `workflow_run` events, where both the workflow actor and the actor that started the upstream run are checked. `workflow_dispatch`, `repository_dispatch`, and `schedule` events are not checked separately — GitHub itself requires write access to dispatch a workflow, and scheduled runs have no external actor. `merge_group` events are not checked separately either, because only someone allowed to merge a pull request can add it to a merge queue.
-- **Bot User Control**: By default, GitHub Apps and bots cannot trigger this action for security reasons. The one exception is GitHub's merge queue app, `github-merge-queue[bot]`, which GitHub reports as the actor of every `merge_group` run and which the action accepts for that event only. Use the `allowed_bots` parameter to enable specific bots or all bots
+- **Bot User Control**: By default, GitHub Apps and bots cannot trigger this action for security reasons. The one exception is GitHub's merge queue app, `github-merge-queue[bot]`, which GitHub normally reports as the actor of `merge_group` runs and which the action accepts for that event only. Any other actor on a `merge_group` event gets the normal bot check: a user account passes, with no write-access check as noted above, and any other bot needs an `allowed_bots` entry. Use the `allowed_bots` parameter to enable specific bots or all bots
   - **⚠️ Allowed bots are not checked for repository permissions.** A bot that matches an entry does **not** need to be installed on your repository or have write access. On a **public repository**, external parties — including GitHub Apps created by anyone — may be able to trigger workflow events such as opening issues, commenting, or reviewing pull requests. If your workflow listens on those events and `allowed_bots` is set to `'*'`, any such App can invoke this action with a prompt it controls.
   - Prefer an explicit list over `'*'`
   - Only list App names you trust
@@ -20,7 +20,7 @@
 - **No Cross-Repository Access**: Each action invocation is limited to the repository where it was triggered
 - **Limited Scope**: The token cannot access other repositories or perform actions beyond the configured permissions
 
-## Using this action with `pull_request_target`, `workflow_run`, or `merge_group`
+## Using this action with `pull_request_target` or `workflow_run`
 
 For `workflow_run` events, the action checks the repository access of the actor that started the upstream run (for example, the author of the fork pull request that triggered your CI workflow) in addition to the workflow actor. If that actor does not have write access, the action stops before running Claude. To run on `workflow_run` events downstream of pull requests from contributors without write access, add those users to `allowed_non_write_users` and pass `github_token: ${{ secrets.GITHUB_TOKEN }}` — see the notes on that input above and keep the workflow's permissions minimal.
 
@@ -51,8 +51,6 @@ For `workflow_run` events, the action checks the repository access of the actor 
 
 This is general guidance for these event types — see [GitHub's documentation](https://securitylab.github.com/research/github-actions-preventing-pwn-requests/).
 
-`merge_group` runs also have the base repository's secrets, and `actions/checkout` with no `ref` checks out the merge group commit, which contains the queued pull requests' changes. Someone allowed to merge approved those changes by queueing them, but if your queue accepts pull requests from forks, treat that code as untrusted input to Claude. Keep the allowed tools to what the check needs, and pass `github_token: ${{ secrets.GITHUB_TOKEN }}` with a minimal `permissions:` block: without `github_token` the action uses the Claude GitHub App's token, which the job's `permissions:` does not limit. If you allow Bash, also set `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: 1` in the job's `env:`, since the action turns that scrub on by itself only when `allowed_non_write_users` is set.
-
 ### Which files come from the base branch on pull requests
 
 When the action runs against a pull request, it restores a fixed list of Claude configuration paths from the PR base branch before starting Claude. It does the same for a `merge_group` event, restoring from the branch the merge group targets, since the merge group commit contains the queued pull requests' changes. The paths are `.claude/`, `.mcp.json`, `.claude.json`, `.gitmodules`, `.ripgreprc`, `CLAUDE.md`, `CLAUDE.local.md`, and `.husky/`. Paths in that list that do not exist on the base branch are removed, and the PR-authored versions are kept under `.claude-pr/` for reference only.
@@ -64,6 +62,12 @@ Note that the runtime executing the tool also reads project config. `bunx <tool>
 ### `claude-code-action` vs `claude-code-base-action`
 
 `claude-code-base-action` is a lower-level building block that installs and runs Claude Code with the inputs you provide. It does not perform actor permission checks or restore project configuration from the base ref. If you need those behaviors, use this action (`claude-code-action`). See the [base-action README](../base-action/README.md#trust-model) for details.
+
+## Using this action with `merge_group`
+
+`merge_group` runs have the base repository's secrets, and `actions/checkout` with no `ref` checks out the merge group commit, which contains the queued pull requests' changes. Someone allowed to merge approved those changes by queueing them, but if your queue accepts pull requests from forks, treat that code as untrusted input to Claude. Keep the allowed tools to what the check needs, and pass `github_token: ${{ secrets.GITHUB_TOKEN }}` with a minimal `permissions:` block: without `github_token` the action uses the Claude GitHub App's token, which the job's `permissions:` does not limit. If you allow Bash, also set `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: 1` in the job's `env:`, since the action turns that scrub on by itself only when `allowed_non_write_users` is set.
+
+The `no ref: → base branch` comments in the patterns for `pull_request_target` and `workflow_run` do not hold here, because the default checkout is the merge group itself. [`examples/merge-queue-check.yml`](../examples/merge-queue-check.yml) checks it out at the workspace root and relies on a read-only token, a tool list without Bash, and the action restoring [its configuration files from the target branch](#which-files-come-from-the-base-branch-on-pull-requests). The caveat in that section applies to merge groups too: a hook, `apiKeyHelper`, or `statusLine` command in the target branch's `.claude/settings.json` runs outside the allowed tools, and if it calls a package script or a repo-relative script it runs what the queued pull requests supply. For stricter separation, use the subdirectory pattern: check out `${{ github.event.merge_group.base_ref }}` at the workspace root and `${{ github.event.merge_group.head_sha }}` into a subdirectory passed with `--add-dir`.
 
 ## Pull Request Creation
 

@@ -15,6 +15,10 @@ jobs:
     # the pull request and Claude only runs in the merge queue.
     if: github.event_name == 'merge_group'
     runs-on: ubuntu-latest
+    # Stops a run that stalls from holding up the entries behind it. A timeout
+    # fails the check, which removes the entry from the queue, so allow enough
+    # time for your repository's largest merge groups.
+    timeout-minutes: 10
     permissions:
       contents: read
 

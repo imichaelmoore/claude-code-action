@@ -60,6 +60,7 @@ jobs:
   claude-merge-check:
     if: github.event_name == 'merge_group'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -82,7 +83,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-`merge_group` runs in agent mode, so it needs a `prompt` and does not support `track_progress`. GitHub attributes these runs to its `github-merge-queue[bot]` app rather than to the person who queued the pull request, and the action accepts that actor for `merge_group` events without an `allowed_bots` entry.
+`merge_group` runs in agent mode, so it needs a `prompt` and does not support `track_progress`. GitHub normally attributes these runs to its `github-merge-queue[bot]` app rather than to the person who queued the pull request, and the action accepts that actor for `merge_group` events without an `allowed_bots` entry. See [security](./security.md#using-this-action-with-merge_group) for who can trigger these runs and how to limit what they can reach.
 
 Pass `github_token: ${{ secrets.GITHUB_TOKEN }}` for merge queue checks. Without it, the action exchanges an OIDC token for a Claude GitHub App token, and that exchange skips the run whenever the workflow file differs from the default branch's copy. In a merge queue that happens every time a queued pull request edits the workflow, and on queues for branches whose copy of the workflow differs, so a required check would never get a verdict. The workflow token is also limited to the job's `permissions:`, which the App token is not.
 
@@ -90,7 +91,7 @@ The merge group commit contains the queued pull requests' changes, so before Cla
 
 By default `git diff` takes `.gitattributes` and `.gitmodules` from the checkout, which here is the queued pull requests' content. `--attr-source` (git 2.41 or later) reads attributes from the target branch instead, so a queued pull request cannot mark a file `-diff` or `binary` to keep its content out of the review, and `--ignore-submodules=none` shows submodule changes whatever `.gitmodules` says. The `rm` stops a committed `merge-group.diff` symlink from redirecting the write.
 
-The action step succeeds whatever Claude concludes. To make the queue wait for a verdict, add a step that fails the job when Claude finds a problem, as the example does with `--json-schema` and `structured_output`, then add the job as a required status check. GitHub also requires that check to pass on the pull request before it can join the queue; the `pull_request` trigger and job-level `if` above handle this, since a job skipped by `if` reports success.
+The action step succeeds whatever Claude concludes. To make the queue wait for a verdict, add a step that fails the job when Claude finds a problem, as the example does with `--json-schema` and `structured_output`, then add the job as a required status check. `timeout-minutes` stops a stalled run from holding up the entries behind it; a timeout fails the check, which removes the entry from the queue, so allow enough time for your largest merge groups. GitHub also requires that check to pass on the pull request before it can join the queue; the `pull_request` trigger and job-level `if` above handle this, since a job skipped by `if` reports success.
 
 ## Author-Specific Code Reviews
 
