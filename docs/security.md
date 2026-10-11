@@ -63,6 +63,21 @@ Note that the runtime executing the tool also reads project config. `bunx <tool>
 
 `claude-code-base-action` is a lower-level building block that installs and runs Claude Code with the inputs you provide. It does not perform actor permission checks or restore project configuration from the base ref. If you need those behaviors, use this action (`claude-code-action`). See the [base-action README](../base-action/README.md#trust-model) for details.
 
+## Running Claude Code Inside a Sandbox
+
+With `path_to_claude_code_wrapper` the action starts the Claude Code session through an executable that you provide, which can set up an operating-system sandbox such as [sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime) around it. The action offers a way to sandbox the session. It does not ship a sandbox, and what the sandbox allows is yours to decide. See [Running Claude Code Inside a Sandbox (Launch Wrapper)](./configuration.md#running-claude-code-inside-a-sandbox-launch-wrapper) for the details and a complete example.
+
+What a wrapper can give you: limits on the files, the network and the environment variables that Claude Code and everything it starts (tools, hooks, MCP servers) can reach.
+
+What it cannot give you:
+
+- **It covers the session and nothing else.** The action's own process runs beside the session, outside the sandbox, and holds the GitHub token. Plugin installation and every other step of the job are outside too. Files the session wrote in the workspace are still there afterwards, so a later step that executes something from the workspace executes it outside the sandbox.
+- **Unsetting variables does not remove the GitHub token from the session.** The token is also in the `--mcp-config` argument whenever one of the action's MCP servers is configured, and in the checkout's `origin` URL in `.git/config`.
+- **Tag mode needs GitHub.** The action's MCP servers, `git push` and `gh` run inside the sandbox, so it has to allow them the GitHub hosts and the token.
+- **A network allow list is not a closed network.** Whatever an allowed host's API lets a client do, the session can do.
+
+**The wrapper itself must come from a trusted place.** It runs with the step's full environment, tokens included, before any sandbox exists. Write it in an earlier step into `$RUNNER_TEMP`, or bake it into the runner's image. Never point the input at a file in a checkout of a pull request's head: the author of that pull request controls the file, and the restoring of configuration files from the base branch described above does not cover it. The action therefore refuses a path inside the workspace. The same caution applies to `path_to_claude_code_executable` and `path_to_bun_executable`, which have no such check.
+
 ## Pull Request Creation
 
 In its default configuration, **Claude does not create pull requests automatically** when responding to `@claude` mentions. Instead:

@@ -6,6 +6,7 @@ export type ClaudeOptions = {
   claudeArgs?: string;
   model?: string;
   pathToClaudeCodeExecutable?: string;
+  pathToClaudeCodeWrapper?: string;
   allowedTools?: string;
   disallowedTools?: string;
   maxTurns?: string;
@@ -21,5 +22,9 @@ export async function runClaude(
   options: ClaudeOptions,
 ): Promise<ClaudeRunResult> {
   const parsedOptions = parseSdkOptions(options);
-  return runClaudeWithSdk(promptPath, parsedOptions);
+  return runClaudeWithSdk(
+    promptPath,
+    parsedOptions,
+    options.pathToClaudeCodeWrapper,
+  );
 }

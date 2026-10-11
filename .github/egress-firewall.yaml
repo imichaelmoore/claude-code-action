@@ -18,12 +18,13 @@ allow:
   # Bun and Node.js release downloads (oven-sh/setup-bun and actions/setup-node)
   - release-assets.githubusercontent.com
   # npm packages (bun install in action.yml, base-action/action.yml and
-  # test-mcp-servers.yml)
+  # test-mcp-servers.yml; npm install of sandbox-runtime in test-claude-code-wrapper.yml)
   - registry.npmjs.org
   # Bun install script (test-custom-executables.yml, "Install Bun manually")
   - bun.sh
   # apt packages bubblewrap and socat, which the Claude Code action installs when a
-  # workflow admits users without write access (issue-triage.yml)
+  # workflow admits users without write access (issue-triage.yml), and the same two
+  # with ripgrep, which test-claude-code-wrapper.yml installs for sandbox-runtime
   - azure.archive.ubuntu.com
   - archive.ubuntu.com
   - security.ubuntu.com

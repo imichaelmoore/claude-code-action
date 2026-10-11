@@ -1,0 +1,152 @@
+name: Test Claude Code Wrapper
+
+# ci-all.yml calls this on pull requests and on pushes to main
+on:
+  workflow_dispatch:
+  workflow_call:
+
+# The Claude API is authenticated via workload identity federation: id-token
+# lets the action mint the GitHub OIDC token it exchanges for a short-lived
+# access token. See docs/setup.md.
+permissions:
+  contents: read
+  id-token: write
+
+# Pin the model so these tests don't depend on the CLI's default model,
+# which can change with each Claude Code release.
+env:
+  ANTHROPIC_MODEL: claude-opus-5
+
+jobs:
+  test-srt-wrapper:
+    # Skip on fork PRs since they can't mint the OIDC token used for Claude API auth
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04-firewall
+    env:
+      # base-action puts Node 18 first on PATH unless NODE_VERSION says otherwise,
+      # and sandbox-runtime needs Node 20.11 or newer.
+      NODE_VERSION: "22.x"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install sandbox-runtime and the packages it needs
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap socat ripgrep
+          # Ubuntu 24.04 strips capabilities from unprivileged user namespaces,
+          # which bubblewrap needs. The setting applies to the whole machine.
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          npm install --global --prefix "$RUNNER_TEMP/sandbox/srt" \
+            --ignore-scripts @anthropic-ai/sandbox-runtime@0.0.75
+
+      - name: Write the sandbox settings and the wrapper
+        run: |
+          S="$RUNNER_TEMP/sandbox"
+          mkdir -p "$S/empty" "$S/tmp" "$S/denied" "$HOME/.claude"
+          [ -f "$HOME/.claude.json" ] || echo '{}' > "$HOME/.claude.json"
+          echo canary > "$S/denied/canary"
+
+          jq -n --arg workspace "$GITHUB_WORKSPACE" --arg home "$HOME" \
+            --arg s "$S" --arg temp "$RUNNER_TEMP" '{
+              network: { allowedDomains: ["api.anthropic.com"], deniedDomains: [] },
+              filesystem: {
+                denyRead: ["\($s)/denied"],
+                allowWrite: [
+                  $workspace,
+                  "\($home)/.claude",
+                  "\($home)/.claude.json",
+                  "\($s)/tmp",
+                  "\($temp)/claude-workload-identity"
+                ],
+                denyWrite: []
+              }
+            }' > "$S/settings.json"
+
+          cat > "$S/claude-in-srt.sh" <<'EOF'
+          #!/bin/sh
+          # Starts "$@", which is Claude Code and its arguments, inside sandbox-runtime.
+          S="$RUNNER_TEMP/sandbox"
+          project=$PWD
+          # For the last step: which program the action asked for, one line per start.
+          printf '%s\n' "$1" >> "$S/started"
+          # srt points TMPDIR inside the sandbox at this folder, which the settings make writable.
+          export CLAUDE_CODE_TMPDIR="$S/tmp"
+          # Launch srt from an empty folder, so that its placeholder files do not appear in the checkout.
+          cd "$S/empty" || exit 1
+          exec "$S/srt/bin/srt" --settings "$S/settings.json" -- sh -c '
+            printf "%s" "$SANDBOX_RUNTIME" > "$TMPDIR/started-inside"
+            cd "$1" && shift && exec "$@"
+          ' sh "$project" "$@"
+          EOF
+          chmod +x "$S/claude-in-srt.sh"
+
+      - name: Check that the sandbox holds
+        run: |
+          S="$RUNNER_TEMP/sandbox"
+          cd "$S/empty"
+          run_in_srt() { "$S/srt/bin/srt" --settings "$S/settings.json" -- "$@"; }
+          if ! run_in_srt true; then
+            echo "❌ srt could not start a command on this runner"
+            SRT_DEBUG=true run_in_srt true || true
+            exit 1
+          fi
+          if run_in_srt touch "$S/not-in-the-write-list"; then
+            echo "❌ A write outside the allowed paths succeeded"
+            exit 1
+          fi
+          if run_in_srt cat "$S/denied/canary"; then
+            echo "❌ A read of a denied folder succeeded"
+            exit 1
+          fi
+          # A host this job's egress firewall allows and the sandbox's settings do not.
+          curl -fsS -o /dev/null https://registry.npmjs.org/-/ping
+          if run_in_srt curl -fsS -o /dev/null https://registry.npmjs.org/-/ping; then
+            echo "❌ A host outside the sandbox's allow list was reached"
+            exit 1
+          fi
+          echo "✅ The sandbox refuses what its settings do not allow"
+
+      - name: Run Claude Code inside srt
+        id: sandboxed
+        uses: ./base-action
+        with:
+          prompt: |
+            List the files in the current directory starting with "package"
+          anthropic_federation_rule_id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+          anthropic_organization_id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          anthropic_service_account_id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+          path_to_claude_code_wrapper: ${{ runner.temp }}/sandbox/claude-in-srt.sh
+          claude_args: '--allowedTools "LS,Read" --permission-mode auto'
+
+      - name: Verify the session ran inside the sandbox
+        env:
+          CONCLUSION: ${{ steps.sandboxed.outputs.conclusion }}
+          OUTPUT_FILE: ${{ steps.sandboxed.outputs.execution_file }}
+        run: |
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "❌ Action failed inside the sandbox"
+            exit 1
+          fi
+          if ! jq . "$OUTPUT_FILE" > /dev/null; then
+            echo "❌ Execution log is missing or is not valid JSON"
+            exit 1
+          fi
+          # srt sets SANDBOX_RUNTIME=1 for the command it starts.
+          if [ "$(cat "$RUNNER_TEMP/sandbox/tmp/started-inside")" != "1" ]; then
+            echo "❌ Claude Code was not started by sandbox-runtime"
+            exit 1
+          fi
+          # One line: the wrapper was started once, with the Claude Code the action installed.
+          if [ "$(cat "$RUNNER_TEMP/sandbox/started")" != "$HOME/.local/bin/claude" ]; then
+            echo "❌ The wrapper was not started exactly once with the installed Claude Code"
+            exit 1
+          fi
+          case ":$PATH:" in
+            *":$RUNNER_TEMP/sandbox:"*)
+              echo "❌ The wrapper's folder was added to PATH"
+              exit 1
+              ;;
+          esac
+          echo "✅ The session ran inside sandbox-runtime"

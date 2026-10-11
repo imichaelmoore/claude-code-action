@@ -9,10 +9,17 @@ import { installPlugins } from "./install-plugins";
 import { setExecutionFileOutputIfPresent } from "./execution-file";
 import { setupWorkloadIdentity } from "./workload-identity";
 import type { WorkloadIdentityHandle } from "./workload-identity";
+import { validateClaudeCodeWrapper } from "./claude-code-wrapper";
 
 async function run() {
   let workloadIdentity: WorkloadIdentityHandle | undefined;
   try {
+    // Refuse a bad wrapper before anything else, identity token included
+    const claudeWrapper = validateClaudeCodeWrapper(
+      process.env.INPUT_PATH_TO_CLAUDE_CODE_WRAPPER,
+      process.env.INPUT_PATH_TO_CLAUDE_CODE_EXECUTABLE,
+    );
+
     // When workload identity federation is configured, fetch the GitHub OIDC
     // identity token and expose it to the CLI before validating auth env vars.
     workloadIdentity = await setupWorkloadIdentity();
@@ -32,7 +39,8 @@ async function run() {
       undefined, // homeDir
     );
 
-    // Install Claude Code plugins if specified
+    // Install Claude Code plugins if specified. These calls go to the real
+    // executable, not through the wrapper.
     await installPlugins(
       process.env.INPUT_PLUGIN_MARKETPLACES,
       process.env.INPUT_PLUGINS,
@@ -55,6 +63,7 @@ async function run() {
       fallbackModel: process.env.INPUT_FALLBACK_MODEL,
       model: process.env.ANTHROPIC_MODEL,
       pathToClaudeCodeExecutable: claudeExecutable,
+      pathToClaudeCodeWrapper: claudeWrapper,
       showFullOutput: process.env.INPUT_SHOW_FULL_OUTPUT,
     });
 
